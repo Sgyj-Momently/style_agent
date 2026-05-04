@@ -170,6 +170,7 @@ def _build_voice_rewrite_prompt(markdown: str, profile: dict[str, Any], style: s
 
 규칙:
 - 출력은 Markdown 본문만 반환한다. 설명, 코드블록, JSON 금지.
+- 반드시 한국어로만 출력한다. 중국어, 일본어, 영어 등 다른 언어 혼용 절대 금지.
 - 사진 파일명과 이미지 태그는 절대 바꾸지 않는다.
 - 없는 장소, 메뉴, 가격, 감정, 사건을 새로 만들지 않는다.
 - 너무 과장하지 말고, 사용자의 문장 리듬/어미/감정 표현을 따라 한다.
@@ -192,7 +193,12 @@ def _strip_markdown_fence(text: str) -> str:
     if stripped.startswith("```"):
         stripped = re.sub(r"^```(?:markdown|md)?\s*", "", stripped)
         stripped = re.sub(r"\s*```$", "", stripped)
-    return stripped.strip()
+    stripped = stripped.strip()
+    # Qwen 모델이 중국어로 대부분 출력한 경우 fallback을 유발한다.
+    cjk_count = sum(1 for ch in stripped if "\u4e00" <= ch <= "\u9fff" or "\u3400" <= ch <= "\u4dbf")
+    if len(stripped) > 0 and cjk_count / len(stripped) > 0.2:
+        raise ValueError(f"LLM output is predominantly Chinese ({cjk_count}/{len(stripped)} CJK chars), falling back")
+    return stripped
 
 
 def _normalize_markdown(markdown: str) -> str:
