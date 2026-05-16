@@ -19,6 +19,7 @@ class StyleRequest(BaseModel):
     tone: str | None = None
     voice_profile: dict[str, Any] | None = None
     voice_profile_id: str | None = None
+    deterministic_voice: bool = False
 
 
 @app.get("/health")

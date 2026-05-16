@@ -93,6 +93,7 @@ BUILTIN_VOICE_PROFILES: dict[str, dict[str, Any]] = {
 def apply_style(payload: dict[str, Any], llm_rewriter: StyleRewriter | None = None) -> dict[str, Any]:
     markdown = _normalize_markdown(str(payload.get("draft_markdown") or ""))
     style = str(payload.get("style") or payload.get("tone") or "warm_blog")
+    deterministic_voice = bool(payload.get("deterministic_voice"))
     voice_profile = payload.get("voice_profile") if isinstance(payload.get("voice_profile"), dict) else None
     if voice_profile is None:
         voice_profile = BUILTIN_VOICE_PROFILES.get(str(payload.get("voice_profile_id") or ""))
@@ -106,13 +107,17 @@ def apply_style(payload: dict[str, Any], llm_rewriter: StyleRewriter | None = No
         markdown = _add_warm_touch(markdown)
 
     if voice_profile:
-        try:
-            rewriter = llm_rewriter or _rewrite_with_ollama
-            markdown = _normalize_markdown(rewriter(markdown, voice_profile, style))
-            style_status = "ok_llm"
-        except Exception as exc:
+        if deterministic_voice:
             markdown = _apply_voice_profile(markdown, voice_profile)
-            style_status = f"ok_fallback: llm_rewrite_failed ({exc})"
+            style_status = "ok_deterministic_voice"
+        else:
+            try:
+                rewriter = llm_rewriter or _rewrite_with_ollama
+                markdown = _normalize_markdown(rewriter(markdown, voice_profile, style))
+                style_status = "ok_llm"
+            except Exception as exc:
+                markdown = _apply_voice_profile(markdown, voice_profile)
+                style_status = f"ok_fallback: llm_rewrite_failed ({exc})"
 
     result = {
         "style_status": style_status,
@@ -288,6 +293,9 @@ def _rewrite_sentence_end(line: str, preferred_ending: str, expressive: bool) ->
         if not body.endswith(("요.", "요!", "요?")) and re.search(r"[가-힣]$", body):
             body += "요."
     elif preferred_ending == "다" and not body.endswith(("다.", "다!", "다?")):
+        body = re.sub(r"었어요[.!?]*$", "었다.", body)
+        body = re.sub(r"았어요[.!?]*$", "았다.", body)
+        body = re.sub(r"어요[.!?]*$", "었다.", body)
         body = re.sub(r"요[.!?]*$", "다.", body)
     if expressive and body.endswith("요."):
         body = body[:-1] + "!"
