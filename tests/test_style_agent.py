@@ -142,6 +142,34 @@ class StyleAgentTest(TestCase):
         self.assertEqual(_rewrite_sentence_end("이미 좋아요.", "요", False), "이미 좋아요.")
         self.assertEqual(_rewrite_sentence_end("이미 좋다.", "다", False), "이미 좋다.")
 
+    def test_rewrite_sentence_end_converts_polite_to_grammatical_plain_da(self):
+        cases = {
+            # 과거형 어미는 '었/았'을 유지한다.
+            "오늘 날씨가 정말 추웠어요.": "오늘 날씨가 정말 추웠다.",
+            "어제 시험 공부를 했어요.": "어제 시험 공부를 했다.",
+            "그날 기분이 무척 좋았어요.": "그날 기분이 무척 좋았다.",
+            # 받침 있는 어간 + '아/어요' -> 기본형 '다'.
+            "그 풍경이 정말 좋아요.": "그 풍경이 정말 좋다.",
+            "지금 창밖을 보고 있어요.": "지금 창밖을 보고 있다.",
+            # '해요' -> 기본형 '하다'.
+            "요즘 나는 아주 행복해요.": "요즘 나는 아주 행복하다.",
+        }
+        for polite, plain in cases.items():
+            with self.subTest(polite=polite):
+                self.assertEqual(_rewrite_sentence_end(polite, "다", False), plain)
+
+    def test_rewrite_sentence_end_leaves_irregular_contractions_untouched(self):
+        # '와요/가요'처럼 어간이 모음으로 줄어든 불규칙 활용은 정규식으로
+        # 과거형을 복원할 수 없으므로 비문('와다')을 만들지 않고 원문을 둔다.
+        self.assertEqual(
+            _rewrite_sentence_end("창밖에 비가 펑펑 와요.", "다", False),
+            "창밖에 비가 펑펑 와요.",
+        )
+        self.assertEqual(
+            _rewrite_sentence_end("이제 집으로 천천히 가요.", "다", False),
+            "이제 집으로 천천히 가요.",
+        )
+
     def test_strip_markdown_fence_and_rejects_chinese_output(self):
         self.assertEqual(_strip_markdown_fence("```markdown\n# 제목\n```"), "# 제목")
         with self.assertRaises(ValueError):
