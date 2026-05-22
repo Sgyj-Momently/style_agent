@@ -189,6 +189,8 @@ class StyleAgentTest(TestCase):
 
         self.assertIn("내 말투", prompt)
         self.assertIn("짧게 쓴다", prompt)
+        self.assertIn("문장의 정보량을 줄이지 않는다", prompt)
+        self.assertIn("템플릿성 문구", prompt)
         self.assertIn("# Trip", prompt)
 
     @patch("src.style_editor.request.urlopen")
