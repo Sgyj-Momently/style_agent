@@ -93,6 +93,7 @@ BUILTIN_VOICE_PROFILES: dict[str, dict[str, Any]] = {
 def apply_style(payload: dict[str, Any], llm_rewriter: StyleRewriter | None = None) -> dict[str, Any]:
     markdown = _normalize_markdown(str(payload.get("draft_markdown") or ""))
     style = str(payload.get("style") or payload.get("tone") or "warm_blog")
+    deterministic_voice = bool(payload.get("deterministic_voice"))
     voice_profile = payload.get("voice_profile") if isinstance(payload.get("voice_profile"), dict) else None
     if voice_profile is None:
         voice_profile = BUILTIN_VOICE_PROFILES.get(str(payload.get("voice_profile_id") or ""))
@@ -106,13 +107,17 @@ def apply_style(payload: dict[str, Any], llm_rewriter: StyleRewriter | None = No
         markdown = _add_warm_touch(markdown)
 
     if voice_profile:
-        try:
-            rewriter = llm_rewriter or _rewrite_with_ollama
-            markdown = _normalize_markdown(rewriter(markdown, voice_profile, style))
-            style_status = "ok_llm"
-        except Exception as exc:
+        if deterministic_voice:
             markdown = _apply_voice_profile(markdown, voice_profile)
-            style_status = f"ok_fallback: llm_rewrite_failed ({exc})"
+            style_status = "ok_deterministic_voice"
+        else:
+            try:
+                rewriter = llm_rewriter or _rewrite_with_ollama
+                markdown = _normalize_markdown(rewriter(markdown, voice_profile, style))
+                style_status = "ok_llm"
+            except Exception as exc:
+                markdown = _apply_voice_profile(markdown, voice_profile)
+                style_status = f"ok_fallback: llm_rewrite_failed ({exc})"
 
     result = {
         "style_status": style_status,
@@ -267,6 +272,47 @@ def _rewrite_paragraph(paragraph: str, preferred_ending: str, tags: list[Any]) -
     return "\n".join(lines)
 
 
+def _has_final_consonant(syllable: str) -> bool:
+    """한글 음절에 받침이 있는지 판별한다."""
+    if not syllable:
+        return False
+    code = ord(syllable[-1])
+    if 0xAC00 <= code <= 0xD7A3:
+        return (code - 0xAC00) % 28 != 0
+    return False
+
+
+def _to_plain_da_ending(body: str) -> str:
+    """존댓말 '요' 어미를 문법적으로 올바른 평서형 '다' 어미로 바꾼다.
+
+    구체적인 규칙을 먼저 적용해, 마지막의 거친 '요->다' 치환이 앞 규칙의
+    결과를 덮어쓰지 않도록 한다. 어간이 모음으로 줄어든 불규칙 활용
+    (예: '와요', '가요', '불러요')은 정규식만으로 과거형을 복원할 수 없으므로
+    비문을 만들지 않도록 원문을 그대로 둔다.
+    """
+    # 과거형 어미는 '었/았'을 유지한다.
+    body = re.sub(r"했어요[.!?]*$", "했다.", body)
+    body = re.sub(r"됐어요[.!?]*$", "됐다.", body)
+    body = re.sub(r"([았었])어요[.!?]*$", r"\1다.", body)
+    body = re.sub(r"왔어요[.!?]*$", "왔다.", body)
+    body = re.sub(r"웠어요[.!?]*$", "웠다.", body)
+    # 현재형 '해요' -> 기본형 '하다'.
+    body = re.sub(r"해요[.!?]*$", "하다.", body)
+    # 받침 있는 어간 + '아/어요' -> 기본형 '다' (예: 좋아요->좋다, 있어요->있다).
+    body = re.sub(
+        r"([가-힣])[아어]요[.!?]*$",
+        lambda m: m.group(1) + "다." if _has_final_consonant(m.group(1)) else m.group(0),
+        body,
+    )
+    # 그 외 받침 있는 글자 + '요' -> '다'.
+    body = re.sub(
+        r"([가-힣])요[.!?]*$",
+        lambda m: m.group(1) + "다." if _has_final_consonant(m.group(1)) else m.group(0),
+        body,
+    )
+    return body
+
+
 def _rewrite_sentence_end(line: str, preferred_ending: str, expressive: bool) -> str:
     stripped = line.rstrip()
     if not stripped:
@@ -288,7 +334,7 @@ def _rewrite_sentence_end(line: str, preferred_ending: str, expressive: bool) ->
         if not body.endswith(("요.", "요!", "요?")) and re.search(r"[가-힣]$", body):
             body += "요."
     elif preferred_ending == "다" and not body.endswith(("다.", "다!", "다?")):
-        body = re.sub(r"요[.!?]*$", "다.", body)
+        body = _to_plain_da_ending(body)
     if expressive and body.endswith("요."):
         body = body[:-1] + "!"
     return bullet + body
